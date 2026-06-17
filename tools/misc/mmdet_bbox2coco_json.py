@@ -1,0 +1,116 @@
+"""Generate a COCO-format JSON with person bboxes using mmdet.
+
+Output JSON is directly usable as --json-file for:
+  demo/body3d_two_stage_img_demo.py
+  demo/mesh_img_demo.py
+  demo/top_down_img_demo.py
+"""
+import argparse
+import json
+import os
+
+import mmcv
+from PIL import Image
+
+try:
+    from mmdet.apis import inference_detector, init_detector
+except ImportError:
+    raise ImportError('mmdet is required. Run: pip install mmdet>=2.14.0')
+
+
+IMG_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
+PERSON_CAT_ID = 1  # COCO category id for "person"
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description='Run mmdet on an image directory and save COCO-format JSON')
+    parser.add_argument('det_config', help='mmdet config file')
+    parser.add_argument('det_checkpoint', help='mmdet checkpoint file')
+    parser.add_argument('img_root', help='Directory containing input images')
+    parser.add_argument('out_json', help='Output JSON file path')
+    parser.add_argument(
+        '--bbox-thr', type=float, default=0.3,
+        help='Minimum confidence score for person bbox (default: 0.3)')
+    parser.add_argument(
+        '--device', default='cuda:0', help='Device for inference')
+    return parser.parse_args()
+
+
+def collect_images(img_root):
+    paths = []
+    for fname in sorted(os.listdir(img_root)):
+        ext = os.path.splitext(fname)[1].lower()
+        if ext in IMG_EXTENSIONS:
+            paths.append(fname)
+    return paths
+
+
+def main():
+    args = parse_args()
+
+    det_model = init_detector(
+        args.det_config, args.det_checkpoint, device=args.device)
+
+    fnames = collect_images(args.img_root)
+    if not fnames:
+        raise RuntimeError(f'No images found in {args.img_root}')
+    print(f'Found {len(fnames)} images.')
+
+    images = []
+    annotations = []
+    ann_id = 0
+
+    for img_id, fname in enumerate(mmcv.track_iter_progress(fnames), start=1):
+        full_path = os.path.join(args.img_root, fname)
+        w, h = Image.open(full_path).size
+
+        images.append({
+            'id': img_id,
+            'file_name': fname,
+            'width': w,
+            'height': h,
+        })
+
+        # mmdet returns a list of arrays, one per class (0-indexed)
+        # COCO person is class index 0 in most person-detector configs
+        result = inference_detector(det_model, full_path)
+
+        # result[0] = person class scores shaped (N, 5): x1,y1,x2,y2,score
+        person_bboxes = result[0] if isinstance(result, (list, tuple)) else result
+
+        for bbox in person_bboxes:
+            x1, y1, x2, y2, score = float(bbox[0]), float(bbox[1]), \
+                                     float(bbox[2]), float(bbox[3]), float(bbox[4])
+            if score < args.bbox_thr:
+                continue
+            bw = x2 - x1
+            bh = y2 - y1
+            annotations.append({
+                'id': ann_id,
+                'image_id': img_id,
+                'category_id': PERSON_CAT_ID,
+                'bbox': [round(x1, 2), round(y1, 2),
+                         round(bw, 2), round(bh, 2)],  # xywh format
+                'area': round(bw * bh, 2),
+                'iscrowd': 0,
+                'score': round(score, 4),
+            })
+            ann_id += 1
+
+    coco_json = {
+        'images': images,
+        'annotations': annotations,
+        'categories': [{'id': PERSON_CAT_ID, 'name': 'person'}],
+    }
+
+    os.makedirs(os.path.dirname(os.path.abspath(args.out_json)), exist_ok=True)
+    with open(args.out_json, 'w') as f:
+        json.dump(coco_json, f, indent=2)
+
+    print(f'\nSaved {len(images)} images, {len(annotations)} person bboxes')
+    print(f'-> {args.out_json}')
+
+
+if __name__ == '__main__':
+    main()

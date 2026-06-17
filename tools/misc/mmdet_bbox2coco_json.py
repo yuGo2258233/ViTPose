@@ -55,6 +55,27 @@ def _load_detector(config_path, checkpoint, device):
         cfg.pop('test_cfg')
     # mmdet v2.x does not support data_preprocessor (added in v3.x).
     cfg.model.pop('data_preprocessor', None)
+    # mmdet v2.x inference_detector requires cfg.data.test.pipeline.
+    if not cfg.get('data') or not cfg.data.get('test'):
+        cfg.data = dict(test=dict(pipeline=[
+            dict(type='LoadImageFromFile'),
+            dict(
+                type='MultiScaleFlipAug',
+                img_scale=(1333, 800),
+                flip=False,
+                transforms=[
+                    dict(type='Resize', keep_ratio=True),
+                    dict(type='RandomFlip'),
+                    dict(type='Normalize',
+                         mean=[123.675, 116.28, 103.53],
+                         std=[58.395, 57.12, 57.375],
+                         to_rgb=True),
+                    dict(type='Pad', size_divisor=32),
+                    dict(type='ImageToTensor', keys=['img']),
+                    dict(type='Collect', keys=['img']),
+                ],
+            ),
+        ]))
     return init_detector(cfg, checkpoint, device=device)
 
 

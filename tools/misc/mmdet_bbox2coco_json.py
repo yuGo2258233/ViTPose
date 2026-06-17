@@ -53,6 +53,8 @@ def _load_detector(config_path, checkpoint, device):
     # If the model already carries test_cfg, drop the redundant outer field.
     if cfg.get('test_cfg') is not None and cfg.model.get('test_cfg') is not None:
         cfg.pop('test_cfg')
+    # mmdet v2.x does not support data_preprocessor (added in v3.x).
+    cfg.model.pop('data_preprocessor', None)
     return init_detector(cfg, checkpoint, device=device)
 
 

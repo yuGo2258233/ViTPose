@@ -10,7 +10,7 @@ import json
 import os
 
 import mmcv
-from PIL import Image
+from PIL import Image, ImageDraw
 
 try:
     from mmdet.apis import inference_detector, init_detector
@@ -34,6 +34,9 @@ def parse_args():
         help='Minimum confidence score for person bbox (default: 0.3)')
     parser.add_argument(
         '--device', default='cuda:0', help='Device for inference')
+    parser.add_argument(
+        '--out-img-dir', default=None,
+        help='Directory to save visualized bbox images (optional)')
     return parser.parse_args()
 
 
@@ -90,6 +93,9 @@ def main():
         raise RuntimeError(f'No images found in {args.img_root}')
     print(f'Found {len(fnames)} images.')
 
+    if args.out_img_dir:
+        os.makedirs(args.out_img_dir, exist_ok=True)
+
     images = []
     annotations = []
     ann_id = 0
@@ -112,6 +118,10 @@ def main():
         # result[0] = person class scores shaped (N, 5): x1,y1,x2,y2,score
         person_bboxes = result[0] if isinstance(result, (list, tuple)) else result
 
+        if args.out_img_dir:
+            vis_img = Image.open(full_path).convert('RGB')
+            draw = ImageDraw.Draw(vis_img)
+
         for bbox in person_bboxes:
             x1, y1, x2, y2, score = float(bbox[0]), float(bbox[1]), \
                                      float(bbox[2]), float(bbox[3]), float(bbox[4])
@@ -119,6 +129,9 @@ def main():
                 continue
             bw = x2 - x1
             bh = y2 - y1
+            if args.out_img_dir:
+                draw.rectangle([x1, y1, x2, y2], outline='red', width=2)
+                draw.text((x1, y1 - 12), f'{score:.2f}', fill='red')
             annotations.append({
                 'id': ann_id,
                 'image_id': img_id,
@@ -130,6 +143,9 @@ def main():
                 'score': round(score, 4),
             })
             ann_id += 1
+
+        if args.out_img_dir:
+            vis_img.save(os.path.join(args.out_img_dir, fname))
 
     coco_json = {
         'images': images,

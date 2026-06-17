@@ -46,11 +46,21 @@ def collect_images(img_root):
     return paths
 
 
+def _load_detector(config_path, checkpoint, device):
+    """Work around mmdet assertion: test_cfg must not appear in both outer
+    config field and model field simultaneously (older configs do both)."""
+    cfg = mmcv.Config.fromfile(config_path)
+    # If the model already carries test_cfg, drop the redundant outer field.
+    if cfg.get('test_cfg') is not None and cfg.model.get('test_cfg') is not None:
+        cfg.pop('test_cfg')
+    return init_detector(cfg, checkpoint, device=device)
+
+
 def main():
     args = parse_args()
 
-    det_model = init_detector(
-        args.det_config, args.det_checkpoint, device=args.device)
+    det_model = _load_detector(
+        args.det_config, args.det_checkpoint, args.device)
 
     fnames = collect_images(args.img_root)
     if not fnames:

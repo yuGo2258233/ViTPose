@@ -9,7 +9,8 @@ import numpy as np
 from xtcocotools.coco import COCO
 
 from mmpose.apis import (inference_pose_lifter_model,
-                         inference_top_down_pose_model, vis_3d_pose_result)
+                         inference_top_down_pose_model, vis_3d_pose_result,
+                         vis_pose_result)
 from mmpose.apis.inference import init_pose_model
 from mmpose.core import SimpleCamera
 from mmpose.datasets import DatasetInfo
@@ -107,6 +108,13 @@ def main():
         'Default not saving the visualization images.')
     parser.add_argument(
         '--device', default='cuda:0', help='Device for inference')
+    parser.add_argument(
+        '--out-video',
+        type=str,
+        default=None,
+        help='Output video path for 2D pose results (e.g. out.mp4)')
+    parser.add_argument(
+        '--fps', type=int, default=30, help='FPS for output video')
     parser.add_argument('--kpt-thr', type=float, default=0.3)
     parser.add_argument(
         '--radius',
@@ -126,6 +134,7 @@ def main():
 
     # First stage: 2D pose detection
     pose_det_results_list = []
+    frames_2d = []
     if args.only_second_stage:
         from mmpose.apis.inference import _xywh2xyxy
 
@@ -204,6 +213,31 @@ def main():
             for res in pose_det_results:
                 res['image_name'] = image_name
             pose_det_results_list.append(pose_det_results)
+
+            if args.out_video:
+                frame = vis_pose_result(
+                    pose_det_model,
+                    image_name,
+                    pose_det_results,
+                    dataset=dataset,
+                    dataset_info=dataset_info,
+                    kpt_score_thr=args.kpt_thr,
+                    radius=args.radius,
+                    thickness=args.thickness,
+                    show=False)
+                frames_2d.append(frame)
+
+    if args.out_video and frames_2d:
+        import cv2
+        h, w = frames_2d[0].shape[:2]
+        os.makedirs(osp.dirname(osp.abspath(args.out_video)), exist_ok=True)
+        writer = cv2.VideoWriter(
+            args.out_video, cv2.VideoWriter_fourcc(*'mp4v'),
+            args.fps, (w, h))
+        for frame in frames_2d:
+            writer.write(frame)
+        writer.release()
+        print(f'Saved 2D pose video -> {args.out_video}')
 
     # Second stage: Pose lifting
     print('Stage 2: 2D-to-3D pose lifting.')
